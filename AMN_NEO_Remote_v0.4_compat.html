@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#0b1220"><title>AMN NEO Remote v0.4</title>
+<style>:root{color-scheme:dark}*{box-sizing:border-box}body{margin:0;background:#0b1220;color:#f4f7ff;font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.wrap{max-width:580px;margin:auto;padding:20px 16px 70px}.head{display:flex;justify-content:space-between;align-items:center;gap:10px}h1{font-size:24px;margin:0}h2{font-size:17px;margin:0 0 12px}.muted{color:#a4b6cc;font-size:13px}.chip{background:#293548;border-radius:22px;padding:8px 12px;font-size:12px}.card{margin-top:16px;background:#162133;border:1px solid #304058;border-radius:19px;padding:18px}.two{display:grid;grid-template-columns:1fr 1fr;gap:10px}.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:9px}button{border-radius:12px;min-height:49px;padding:12px 8px;border:1px solid #304059;background:#213047;color:#fff;font:inherit;font-weight:650;touch-action:manipulation}button:disabled{opacity:.45}button.primary{background:#40cbbb;color:#052823;border:0}button.danger{background:#98364d;border-color:#bd586d;width:100%;font-size:18px}button.active{background:#40cbbb;color:#052823}.status{font-size:13px;color:#d1dded;margin:14px 0 4px;overflow-wrap:anywhere}.diag{font:12px/1.55 ui-monospace,Menlo,monospace;background:#0c1624;border:1px solid #384b60;padding:9px;border-radius:10px;color:#bed7f3;white-space:pre-wrap;overflow-wrap:anywhere;margin:10px 0}.note{font-size:12px;color:#a4b6cc}.row{display:flex;align-items:center;justify-content:space-between;gap:12px}.log{height:185px;overflow:auto;background:#0c1624;border-radius:10px;padding:10px;white-space:pre-wrap;font:11px/1.6 ui-monospace,Menlo,monospace;overflow-wrap:anywhere}input[type=range]{width:100%;accent-color:#40cbbb}a{color:#6be5d6}</style></head>
+<body><main class="wrap">
+<div class="head"><div><h1>AMN NEO Remote</h1><div class="muted">Prototype v0.4 · 호환성 진단</div></div><span class="chip" id="chip">연결 안 됨</span></div>
+<section class="card"><div class="row"><h2>블루투스 연결</h2><span class="muted" id="battery">배터리 —</span></div><div class="two"><button class="primary" id="connect" type="button" onclick="window.amnConnectFallback()">기기 연결</button><button id="disconnect" type="button" onclick="window.amnDisconnectFallback()" disabled>연결 해제</button></div><div id="status" class="status">기기를 켜고 기기 연결을 누르세요.</div><div id="diagnostic" class="diag">진단 초기화 대기 중</div><button type="button" onclick="window.amnTestFallback()">버튼 동작 테스트</button><div style="margin-top:8px" class="muted">검색 방식</div><div class="two" style="margin-top:8px"><button id="modeAll" type="button" onclick="window.amnSetModeFallback('all')" class="active">전체 검색</button><button id="modeName" type="button" onclick="window.amnSetModeFallback('name')">AMN 이름 검색</button></div></section>
+<section class="card"><h2>진동 패턴</h2><p class="muted">연결 후 패턴을 선택하세요. 실제 장치 검증 전입니다.</p><div class="grid"><button class="pattern" data-p="1" disabled>1</button><button class="pattern" data-p="2" disabled>2</button><button class="pattern" data-p="3" disabled>3</button><button class="pattern" data-p="4" disabled>4</button><button class="pattern" data-p="5" disabled>5</button><button class="pattern" data-p="6" disabled>6</button><button class="pattern" data-p="7" disabled>7</button><button class="pattern" data-p="8" disabled>8</button><button class="pattern" data-p="9" disabled>9</button><button class="pattern" data-p="10" disabled>10</button><button class="pattern" data-p="11" disabled>11</button></div></section>
+<section class="card"><div class="row"><h2>직접 강도</h2><strong id="level">5 / 15</strong></div><input type="range" id="strength" min="0" max="15" value="5" step="1" oninput="document.getElementById('level').textContent=this.value+' / 15'"><button id="sendStrength" disabled type="button" style="width:100%">강도 전송</button><p class="note">직접 강도 명령은 약 1초 후 종료될 수 있습니다.</p></section>
+<section class="card"><h2>정지</h2><button id="stop" class="danger" disabled type="button">■ 진동 정지</button><p class="note">연결이 끊어지면 앱에서 정지를 보장할 수 없습니다. 장치의 전원 버튼을 사용하세요.</p></section>
+<section class="card"><div class="row"><h2>통신 로그</h2><button type="button" onclick="window.amnCopyFallback()">로그 복사</button></div><div class="log" id="log">로딩 중…</div></section>
+<p class="note">HTTPS 페이지를 Bluefy에서 열어야 합니다. 다른 BLE 앱은 연결 해제하세요.</p></main>
+<script>
+(function(){
+  var seq=0,selectedMode='all',device=null,server=null,tx=null,rx=null,connecting=false,operation=Promise.resolve();
+  var CONTROL='0000ffe3-0000-1000-8000-00805f9b34fb';
+  var TX='0000ffe1-0000-1000-8000-00805f9b34fb';
+  var RX='0000ffe2-0000-1000-8000-00805f9b34fb';
+  function el(id){return document.getElementById(id);}
+  function set(id,value){var x=el(id);if(x)x.textContent=value;}
+  function log(value){var x=el('log');if(!x)return;var line=(new Date()).toLocaleTimeString()+'  '+value;if(seq===0)x.textContent='';seq++;x.textContent+=line+'\n';x.scrollTop=x.scrollHeight;}
+  function diag(value){set('diagnostic',value);log('DIAG '+value);}
+  function errorMessage(e){return (e&&e.name?e.name+': ':'')+(e&&e.message?e.message:String(e));}
+  function connected(){return !!(device&&device.gatt&&device.gatt.connected&&tx);}
+  function update(){var on=connected(),patterns=document.querySelectorAll('.pattern');set('chip',on?'연결됨':connecting?'연결 중':'연결 안 됨');el('connect').disabled=connecting||on;el('disconnect').disabled=!on;el('sendStrength').disabled=!on;el('stop').disabled=!on;for(var i=0;i<patterns.length;i++)patterns[i].disabled=!on;}
+  function bytesToHex(bytes){var parts=[];for(var i=0;i<bytes.length;i++){var s=bytes[i].toString(16).toUpperCase();parts.push(s.length===1?'0'+s:s);}return parts.join(' ');}
+  window.amnTestFallback=function(){diag('버튼 이벤트 정상 / JS 활성 / Bluetooth API: '+(navigator.bluetooth?'지원':'미지원'));set('status','버튼 동작 테스트 성공');};
+  window.amnSetModeFallback=function(mode){selectedMode=mode;el('modeAll').className=mode==='all'?'active':'';el('modeName').className=mode==='name'?'active':'';diag('검색 모드: '+(mode==='all'?'전체 검색':'AMN 이름 필터'));};
+  window.amnDisconnectFallback=function(){if(device&&device.gatt&&device.gatt.connected)device.gatt.disconnect();};
+  window.amnCopyFallback=function(){var t=el('log').textContent;if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(t).then(function(){set('status','로그 복사 완료');},function(e){set('status','복사 오류: '+errorMessage(e));});}else{var area=document.createElement('textarea');area.value=t;document.body.appendChild(area);area.select();var ok=document.execCommand('copy');area.parentNode.removeChild(area);set('status',ok?'로그 복사 완료':'복사 지원 안 됨');}};
+  window.onerror=function(message,source,line,col,err){diag('JS 오류: '+message+'\n행 '+line+' / 열 '+col+'\n'+(err&&err.stack?err.stack:''));return false;};
+  window.onunhandledrejection=function(event){diag('비동기 오류: '+errorMessage(event.reason));};
+  function disconnectEvent(){tx=null;rx=null;server=null;set('battery','배터리 —');set('status','연결 해제됨');log('기기 연결 해제');update();}
+  function notifyEvent(event){var v=event.target.value;var b=new Uint8Array(v.buffer,v.byteOffset,v.byteLength);log('RX '+bytesToHex(b));}
+  function readBattery(){return server.getPrimaryService(0x180f).then(function(s){return s.getCharacteristic(0x2a19);}).then(function(c){return c.readValue();}).then(function(v){set('battery','배터리 '+v.getUint8(0)+'%');}).catch(function(e){log('배터리 조회 생략: '+errorMessage(e));});}
+  function onSelected(picked){device=picked;device.addEventListener('gattserverdisconnected',disconnectEvent);set('status','GATT 연결 중…');log('선택된 기기: '+(picked.name||'이름 없음'));return picked.gatt.connect();}
+  function onServer(s){server=s;set('status','FFE3 서비스 확인 중…');return server.getPrimaryService(CONTROL);}
+  function onService(s){return s.getCharacteristic(TX).then(function(c){tx=c;});}
+  function tryRx(){return server.getPrimaryService(CONTROL).then(function(s){return s.getCharacteristic(RX);}).then(function(c){rx=c;rx.addEventListener('characteristicvaluechanged',notifyEvent);return rx.startNotifications();}).then(function(){log('FFE2 알림 ON');}).catch(function(e){log('알림 설정 생략: '+errorMessage(e));});}
+  window.amnConnectFallback=function(){
+    set('status','기기 연결 버튼 입력 확인');diag('BLE 연결 함수 실행됨 / 검색 모드 '+selectedMode);
+    if(!navigator.bluetooth||typeof navigator.bluetooth.requestDevice!=='function'){diag('Web Bluetooth 미지원: Bluefy 앱 및 HTTPS 여부 확인');set('status','Web Bluetooth를 사용할 수 없습니다.');return;}
+    if(connecting||connected())return;
+    connecting=true;update();set('status','BLE 기기 선택창 요청 중…');
+    var options=selectedMode==='all'?{acceptAllDevices:true,optionalServices:[CONTROL,0x180f]}:{filters:[{namePrefix:'AMN'}],optionalServices:[CONTROL,0x180f]};
+    try{
+      navigator.bluetooth.requestDevice(options)
+      .then(onSelected).then(onServer).then(onService).then(function(){set('status','연결 성공');log('FFE1 쓰기 특성 확인');return tryRx();})
+      .then(function(){return readBattery();})
+      .then(function(){diag('BLE 연결 및 초기화 성공');})
+      .catch(function(e){diag('연결 오류: '+errorMessage(e));set('status','연결 실패: '+errorMessage(e));tx=null;if(device&&device.gatt&&device.gatt.connected)device.gatt.disconnect();})
+      .then(function(){connecting=false;update();},function(e){connecting=false;diag('연결 후처리 오류: '+errorMessage(e));update();});
+    }catch(e){connecting=false;diag('동기 호출 오류: '+errorMessage(e));update();}
+  };
+  function write6(data,label){if(!connected())return Promise.reject(new Error('연결되지 않음'));var bytes=new Uint8Array(data);var promise;
+    if(tx.properties.writeWithoutResponse&&typeof tx.writeValueWithoutResponse==='function')promise=tx.writeValueWithoutResponse(bytes);
+    else if(tx.properties.write&&typeof tx.writeValueWithResponse==='function')promise=tx.writeValueWithResponse(bytes);
+    else if(typeof tx.writeValue==='function')promise=tx.writeValue(bytes);
+    else return Promise.reject(new Error('쓰기 API 미지원'));
+    return promise.then(function(){log('TX '+bytesToHex(bytes)+' / '+label);set('status',label+' 전송 완료');});}
+  function queueWrite(bytes,label){operation=operation.catch(function(){}).then(function(){return write6(bytes,label);});return operation.catch(function(e){diag('쓰기 실패: '+errorMessage(e));});}
+  function pattern(n){return [0x55,0x03,0x01,0x00,n,0x00];}
+  function strength(n){return [0x55,0x04,0x00,0x00,0x00,n];}
+  function setup(){var nodes=document.querySelectorAll('.pattern');for(var i=0;i<nodes.length;i++){(function(btn){btn.addEventListener('click',function(){var n=Number(btn.getAttribute('data-p'));queueWrite(pattern(n),'패턴 '+n).then(function(){for(var j=0;j<nodes.length;j++)nodes[j].className='pattern';btn.className='pattern active';});});})(nodes[i]);}
+    el('sendStrength').addEventListener('click',function(){queueWrite(strength(Number(el('strength').value)),'강도 '+el('strength').value);});
+    el('stop').addEventListener('click',function(){queueWrite(pattern(0),'패턴 정지').then(function(){return queueWrite(strength(0),'강도 정지');});});
+    update();diag('JavaScript 초기화 완료 / BLE API: '+(navigator.bluetooth?'존재':'없음')+' / 버튼 테스트 가능');}
+  try{setup();}catch(e){diag('초기화 오류: '+errorMessage(e));}
+})();
+</script></body></html>
